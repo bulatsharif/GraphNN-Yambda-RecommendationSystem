@@ -41,8 +41,6 @@ Snapshots from the notebook:
 
 ## Team
 
-Team:
-
 * Bulat Sharipov
 * Danil Fathutdinov
 * Dinar Yakupov
