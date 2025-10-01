@@ -2,6 +2,21 @@
 
 Repository for exploring Graph Neural Networks applied to the **Yambda** (Yandex Music) dataset and for prototyping recommender-system ideas on a realistic, industrial-scale dataset.
 
+## Running the service
+
+Currently we have built a basic recommendation service that runs over ItemKNN.
+We have implemented ItemKNN, using various optimizations, so that each query processed quickly.
+
+To run the basic service, do the following commands:
+
+```bash
+cd Application/code
+docker compose build
+docker compose up
+```
+
+After that, you can access Streamlit UI at `0.0.0.0:8501`
+
 ## About the dataset
 
 Yambda (a.k.a. **Yambda-5B / YaMBDa**) is a very large, open dataset of user–track interactions released by Yandex. Key points:
