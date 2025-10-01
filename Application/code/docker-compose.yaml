@@ -1,0 +1,31 @@
+version: "3.9"
+
+services:
+  api:
+    build:
+      context: ../..
+      dockerfile: Application/code/deployment/api/Dockerfile
+    container_name: yambda_api
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+
+  streamlit:
+    build:
+      context: ../..
+      dockerfile: Application/code/deployment/streamlit_app/Dockerfile
+    container_name: yambda_streamlit
+    ports:
+      - "8501:8501"
+    depends_on:
+      - api
+    environment:
+      - API_HOST=api
+      - API_PORT=8000
+    restart: unless-stopped
+
+networks:
+  default:
+    name: yambda_net

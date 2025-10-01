@@ -2,6 +2,7 @@ from typing import Union, Optional
 from fastapi import FastAPI, Body
 from pydantic import BaseModel
 from Application.models.recommend import recommendation_system
+from Application.data.yambda_dataset import dataset
 
 class MusicItem(BaseModel):
     item_id: int
@@ -44,4 +45,12 @@ def recommend_music(
         "recommendations": to_return_recommendations,
         "count": len(to_return_recommendations),
         "used_input_items": bool(user_items),
+    }
+    
+@app.get("/recommend/get_random_items")
+def get_random_items():
+    items = dataset.get_random_items("likes", n=10)
+    return {
+        "random_items": items,
+        "count": len(items),
     }
