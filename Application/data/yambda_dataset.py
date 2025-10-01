@@ -27,6 +27,12 @@ class YambdaDataset:
 
   def artist_item_mapping(self) -> Dataset:
     return self._download("", "artist_item_mapping")
+  
+  def get_random_items(self, event_type: Literal["likes", "listens", "multi_event", "dislikes", "unlikes", "undislikes"], n: int = 10) -> list[int]:
+    interaction_df = self.interaction(event_type)
+    items = interaction_df.to_pandas().sample(n)["item_id"].unique()
+    return items.tolist()
+    
 
   @staticmethod
   def _download(data_dir: str, file: str) -> Dataset:
