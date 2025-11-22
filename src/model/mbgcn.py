@@ -28,7 +28,6 @@ class BehaviourGNNBlock(nn.Module):
 
         return x
     
-
 class MBGCN(nn.Module):
     def __init__(
             self,
@@ -69,13 +68,12 @@ class MBGCN(nn.Module):
         assert fusion in allowed_fusions, f'fusion must be one of {allowed_fusions}'
         if fusion == "attention":
             self.query_proj = nn.Linear(node_emb_dim, node_emb_dim)
-            self.key_projs = nn.ModuleList([nn.Linear(node_emb_dim, node_emb_dim) for _ in range(self.B)])
+            self.key_projs = nn.ModuleList([nn.Linear(node_emb_dim, node_emb_dim) for _ in range(self.num_behaviours)])
             self.fuse_linear = nn.Linear(node_emb_dim, node_emb_dim)
-        elif fusion == "gating":
-            self.gate_linears = nn.ModuleList([nn.Linear(2 * node_emb_dim, node_emb_dim) for _ in range(self.B)])
-            self.fuse_linear = nn.Linear(node_emb_dim, node_emb_dim)
+        elif fusion == "concat":
+            self.fuse_linear = nn.Linear(self.num_behaviours * node_emb_dim, node_emb_dim)
         else:
-            self.fuse_linear = nn.Linear(self.B * node_emb_dim, node_emb_dim)
+            self.fuse_linear = nn.Linear(node_emb_dim, node_emb_dim)
 
         self.refine = nn.Sequential(
             nn.Linear(node_emb_dim, node_emb_dim),
@@ -133,7 +131,7 @@ class MBGCN(nn.Module):
         elif self.fusion == 'attention':
             Q = self.query_proj(x)
             attn_logits = []
-            for b in range(self.B):
+            for b in range(self.num_behaviours):
                 Kb = self.key_projs[b](stack[b])
                 log = (Q * Kb).sum(dim=-1, keepdim=True)
                 attn_logits.append(log)
@@ -146,7 +144,7 @@ class MBGCN(nn.Module):
             fused = (attn_weights * stack_perm).sum(dim=1)
             fused = self.fuse_linear(fused)
         else:
-            raise RuntimeError('Unknown fusion')
+            raise RuntimeError(f'Unknown fusion mechanism: {self.fusion}')
 
         final_emb = self.refine(fused)
         return final_emb
