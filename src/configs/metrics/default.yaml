@@ -1,0 +1,4 @@
+_target_: src.metrics.ranking_metrics.RankingEvaluator
+
+k_list: [5, 10, 20]
+metric_names: ['recall', 'ndcg']

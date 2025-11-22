@@ -1,0 +1,2 @@
+_target_: src.loss.bpr_loss.BPRLoss
+reduction: "mean"

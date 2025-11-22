@@ -1,0 +1,10 @@
+_target_: src.model.mbgcn.MBGCN
+
+item_feat_dim: 128
+node_emb_dim: 128
+user_emb_dim: 128
+behaviour_hidden_dim: 128
+n_gnn_layers: 2
+fusion: "attention"
+dropout: 0.2
+num_behaviours: 1

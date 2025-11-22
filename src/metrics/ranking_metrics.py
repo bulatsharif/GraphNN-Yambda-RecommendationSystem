@@ -1,58 +1,56 @@
 import torch
+from typing import List, Dict
 
-def calc_recall_at_k(scores, labels, k):
-    """
-    Calculate mean Recall@k for a batch of queries.
-    
-    Args:
-        scores (torch.Tensor): Model's predictions (batch_size, num_items)
-        labels (torch.Tensor): Ground Truth (batch_size, num_items)
-        k (int): cutoff threshold
-    """
-    # find indices of top-k maximal scores for each query in a batch, shape (batch_size, k)
-    _, indices = torch.topk(scores, k, dim=1)
-    # calculate the row indices for advanced indexing of shape (batch_size, k)
-    row_indices = torch.arange(scores.shape[0]).view(-1, 1).expand_as(indices)
-    # find labels corresponding to prediction indices, shape (batch_size, k)
-    topk_labels = labels[row_indices, indices]
-    # calculate hits (count of relevant items among predicted)
-    hits = topk_labels.sum(dim=1)
-    # calculate the total number of relevant items for user
-    total_relevant = labels.sum(dim=1)
-    # calculate recall@k
-    epsilon = 1e-9
-    recall = hits / (total_relevant + epsilon)
+class RankingEvaluator:
+    def __init__(self, k_list: List[int], metric_names: List[str]):
+        self.k_list = sorted(k_list)
+        self.metric_names = [m.lower() for m in metric_names]
+        self.max_k = self.k_list[-1]
 
-    return recall.mean()
+    def _calculate_ndcg_score(self, hits: torch.Tensor, num_positives: torch.Tensor, k: int) -> float:
+        device = hits.device
+        batch_size = hits.size(0)
 
-def calc_ndcg_at_k(scores, labels, k):
-    """
-    Calculate mean NDCG@k for a batch of queries.
-    
-    Args:
-        scores (torch.Tensor): Model's predictions (batch_size, num_items)
-        labels (torch.Tensor): Ground Truth (batch_size, num_items)
-        k (int): cutoff threshold
-    """
-    # find indices of top-k maximal scores for each query in a batch, shape (batch_size, k)
-    _, indices = torch.topk(scores, k, dim=1)
-    # calculate the row indices for advanced indexing of shape (batch_size, k)
-    row_indices = torch.arange(scores.shape[0]).view(-1, 1).expand_as(indices)
-    # find labels corresponding to prediction indices, shape (batch_size, k)
-    topk_relevance = labels[row_indices, indices]
-    # calculate logariphmical discounts
-    positions = torch.arange(2, k + 2, device=scores.device, dtype=torch.float32)
-    discounts = torch.log2(positions)
-    # calculate discounted cumulative gain
-    dcg = (topk_relevance / discounts).sum(dim=1)
-    
-    # find sorted labels (desc) to calculate ideal dcg
-    sorted_labels, _ = torch.topk(labels, k, dim=1) 
-    idcg = (sorted_labels / discounts).sum(dim=1)
-    
-    # calculate normalized dcg
-    epsilon = 1e-9
-    ndcg = dcg / (idcg + epsilon)
-    ndcg[idcg == 0] = 0
-    
-    return ndcg.mean()
+        discounts = 1.0 / torch.log2(torch.arange(k, device=device, dtype=torch.float) + 2.0)
+        dcg = (hits * discounts).sum(dim=1)
+        
+        positions = torch.arange(k, device=device).unsqueeze(0).expand(batch_size, -1)
+
+        ideal_mask = (positions < num_positives.unsqueeze(1)).float()
+        idcg = (ideal_mask * discounts).sum(dim=1)
+        idcg[idcg == 0] = 1.0
+        return (dcg / idcg).mean().item()
+
+    def evaluate_full_ranking(self, 
+                              user_emb: torch.Tensor, 
+                              ground_truth_mask: torch.Tensor, 
+                              all_item_emb: torch.Tensor,
+                              history_mask: torch.Tensor = None) -> Dict[str, float]:
+        """
+        Args:
+            user_emb: user embeddigns (batch_size, embedding_dim).
+            ground_truth_mask: mask of item relevancy (batch_size, num_items).
+            all_item_emb: item embeddings (num_items, embedding_dim).
+        """
+        # calculate scores between users and items
+        scores = torch.matmul(user_emb, all_item_emb.t())
+
+        # select indices of items with maximal scores for each user 
+        _, indices = torch.topk(scores, k=self.max_k, dim=1)
+        # calculate hit matrix, 1 - if predicted item is relevant, 0 - otherwise
+        hits = torch.gather(ground_truth_mask, 1, indices)
+        # calculate number of total relevant items for each user
+        num_relevant = ground_truth_mask.sum(dim=1)
+
+        results = {}        
+        for k in self.k_list:
+            hits_k = hits[:, :k]
+            
+            if 'recall' in self.metric_names:
+                rec = hits_k.sum(dim=1) / num_relevant.clamp(min=1.0)
+                results[f'recall@{k}'] = rec.mean().item()
+                
+            if 'ndcg' in self.metric_names:
+                results[f'ndcg@{k}'] = self._calculate_ndcg_score(hits_k, num_relevant, k)
+                
+        return results

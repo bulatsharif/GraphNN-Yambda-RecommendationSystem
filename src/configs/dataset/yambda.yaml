@@ -1,0 +1,7 @@
+root_dir: "./data"
+train_file: "train.csv"
+val_file: "val.csv"
+test_file: "test.csv"
+
+# items' semantic embeddings
+item_features_path: null
