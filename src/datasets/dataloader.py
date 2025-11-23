@@ -72,8 +72,7 @@ def create_loaders(
     user_map: Dict,
     item_map: Dict,
     batch_size: int = 1024,
-    num_neighbors: List[int] = [10, 5],
-    neg_sampling_ratio: float = 1.0
+    num_neighbors: List[int] = [10, 5]
 ) -> Dict[str, LinkNeighborLoader]:
     """
     Creates LinkNeighborLoaders for train, val, and test splits.
@@ -92,7 +91,7 @@ def create_loaders(
         data,
         num_neighbors=num_neighbors,
         edge_label_index=train_edge_label_index,
-        neg_sampling_ratio=neg_sampling_ratio,
+        neg_sampling_ratio=1.0,
         batch_size=batch_size,
         shuffle=True
     )
