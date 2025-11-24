@@ -1,4 +1,4 @@
-from torch_geometric.loader import LinkNeighborLoader
+from torch_geometric.loader import LinkNeighborLoader, NeighborLoader
 from torch_geometric.data import Data
 from typing import Tuple, Dict, List
 import pandas as pd
@@ -84,7 +84,7 @@ def create_loaders(
         i = torch.tensor(df['item_id'].map(item_map).values, dtype=torch.long) + item_offset
         return torch.stack([u, i], dim=0)
 
-    # 1. Train Loader
+    # Train Loader
     train_edge_label_index = df_to_edge_label_index(train_df)
     
     train_loader = LinkNeighborLoader(
@@ -96,7 +96,7 @@ def create_loaders(
         shuffle=True
     )
 
-    # 2. Validation Loader
+    # Validation Loader
     val_edge_label_index = df_to_edge_label_index(val_df)
     
     val_loader = LinkNeighborLoader(
@@ -107,19 +107,17 @@ def create_loaders(
         shuffle=False 
     )
 
-    # 3. Test Loader
-    test_edge_label_index = df_to_edge_label_index(test_df)
-    
-    test_loader = LinkNeighborLoader(
+    # Inference Loader
+    inference_loader = NeighborLoader(
         data,
         num_neighbors=num_neighbors,
-        edge_label_index=test_edge_label_index,
-        batch_size=batch_size,
+        batch_size=4096,
+        input_nodes=None,
         shuffle=False
     )
 
     return {
         "train": train_loader,
         "val": val_loader,
-        "test": test_loader
+        "inference": inference_loader
     }

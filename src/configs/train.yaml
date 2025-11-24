@@ -1,16 +1,19 @@
 defaults:
   - _self_
-  - model: mbgcn
   - dataset: yambda
+  - model: mbgcn
   - dataloader: link_neighbor
   - optimizer: adam
   - loss: bpr
   - trainer: default
-  - logger: comet
   - metrics: default
+  - logger: clearml
 
 seed: 42
 device: "cuda"
+experiment_name: "mbgcn-yambda-base"
 debug: False
 
-experiment_name: "mbgcn-yambda"
+hydra:
+  run:
+    dir: outputs/${experiment_name}/${now:%Y-%m-%d}/${now:%H-%M-%S}

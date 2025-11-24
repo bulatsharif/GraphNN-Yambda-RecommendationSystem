@@ -16,6 +16,7 @@ class MBGCNTrainer:
         loaders: Dict,
         full_data: Any,
         evaluator: RankingEvaluator,
+        train_ground_truth: sp.csr_matrix,
         val_ground_truth: sp.csr_matrix,
         logger, 
         device: str, 
@@ -24,15 +25,46 @@ class MBGCNTrainer:
         self.model = model
         self.optimizer = optimizer
         self.criterion = criterion
+
         self.train_loader = loaders['train']
-        self.full_data = full_data
+        self.val_loader = loaders['val'] 
+        self.inference_loader = loaders['inference']
+
         self.evaluator = evaluator
+        self.train_ground_truth = train_ground_truth
         self.val_ground_truth = val_ground_truth
         self.logger = logger
         self.device = device
-        self.item_feats = item_feats
+        self.item_feats = item_feats.to(device) if item_feats is not None else None
         
         self.step = 0
+
+    def _run_batch(self, batch):
+        """Train step logic"""
+        batch = batch.to(self.device)
+        
+        out = self.model(
+            edge_index=batch.edge_index, 
+            edge_type=batch.edge_type, 
+            node_ids=batch.n_id,
+            item_feats=self.item_feats
+        )
+        
+        assert hasattr(batch, 'edge_label'), "Data batch must have 'edge_label' attribute to calculate loss"
+
+        pos_mask = batch.edge_label == 1.0
+        neg_mask = batch.edge_label == 0.0
+        user_emb = out[batch.edge_label_index[0]]
+        item_emb = out[batch.edge_label_index[1]]
+        pos_scores = (user_emb[pos_mask] * item_emb[pos_mask]).sum(dim=-1)
+        neg_scores = (user_emb[neg_mask] * item_emb[neg_mask]).sum(dim=-1)
+        assert len(pos_scores) == len(neg_scores), "BPR loss assumes that negative_sampling_ratio = 1.0!"
+        
+        loss = self.criterion(pos_scores, neg_scores)
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        return loss.item()
 
     def train_epoch(self, epoch_idx: int):
         self.model.train()
@@ -40,90 +72,86 @@ class MBGCNTrainer:
         pbar = tqdm(self.train_loader, desc=f"Epoch {epoch_idx} [Train]", leave=False)
         
         for batch in pbar:
-            batch = batch.to(self.device)
-            self.optimizer.zero_grad()
+            loss_val = self._run_batch(batch)
+            total_loss += loss_val
+            self.step += 1
             
+            if self.step % 100 == 0:
+                self.logger.log_metrics({'Train/Loss': loss_val}, self.step)
+            pbar.set_postfix({'loss': loss_val})
+            
+        return total_loss / len(self.train_loader)
+    
+    @torch.no_grad()
+    def get_all_embeddings(self) -> torch.Tensor:
+        """
+        Obtain the embeddings of all users and track on cpu through model forwarding by batch.
+        """
+        self.model.eval()
+        all_embeddings = []
+        
+        for batch in tqdm(self.inference_loader, desc="Generating Embeddings", leave=False):
+            batch = batch.to(self.device)
+                        
             out = self.model(
-                edge_index=batch.edge_index, 
-                edge_type=batch.edge_type, 
+                edge_index=batch.edge_index,
+                edge_type=batch.edge_type,
                 node_ids=batch.n_id,
                 item_feats=self.item_feats
             )
-            
-            # Calculate loss
-            pos_mask = batch.edge_label == 1.0
-            neg_mask = batch.edge_label == 0.0
-            pos_edge_index = batch.edge_label_index[:, pos_mask]
-            neg_edge_index = batch.edge_label_index[:, neg_mask]
-            assert pos_edge_index.shape == neg_edge_index.shape, "BPR loss expects negative_sampling_ratio=1.0!"
+            num_target_nodes = batch.batch_size
+            target_embs = out[:num_target_nodes]
+            all_embeddings.append(target_embs.cpu()) # upload to cpu to free GPU memory
 
-            pos_user_emb = out[pos_edge_index[0]]
-            pos_item_emb = out[pos_edge_index[1]]
-            pos_scores = (pos_user_emb * pos_item_emb).sum(dim=-1)
-
-            neg_user_emb = out[neg_edge_index[0]]
-            neg_item_emb = out[neg_edge_index[1]]
-            neg_scores = (neg_user_emb * neg_item_emb).sum(dim=-1)
-                            
-            loss = self.criterion(pos_scores, neg_scores)
-            loss.backward()
-            self.optimizer.step()
-            
-            total_loss += loss.item()
-            self.step += 1
-            
-            if self.step % 50 == 0:
-                self.logger.log_metrics({'Train/Loss': loss.item()}, self.step)
-                
-            pbar.set_postfix({'loss': loss.item()})
-            
-        return total_loss / len(self.train_loader)
-
+        return torch.cat(all_embeddings, dim=0)
+    
     @torch.no_grad()
-    def evaluate(self, batch_size=512):
+    def evaluate_full_ranking(self, batch_size_eval=100):
+        """
+        Evaluate ranking metrics on all the embeddings.
+        1. Obtain all the embeddings (on CPU).
+        2. Upload all item embeddings on GPU.
+        3. Upload user embeddings on GPU by batch.
+        4. Calculate metrics.
+        """
         self.model.eval()
-        full_data_gpu = self.full_data.to(self.device)
-        
-        all_embs = self.model(
-            edge_index=full_data_gpu.edge_index,
-            edge_type=full_data_gpu.edge_type,
-            node_ids=None, 
-            item_feats=self.item_feats
-        )
-        
+        # generate embeddings
+        all_embs_cpu = self.get_all_embeddings()
         num_users = self.model.num_users
-        user_embs_all = all_embs[:num_users]
-        item_embs_all = all_embs[num_users:]
         
+        item_embs = all_embs_cpu[num_users:].to(self.device)
+        
+        # identify validation users
         val_users = np.unique(self.val_ground_truth.nonzero()[0])
         n_val = len(val_users)
+
+        metrics_accum = {}
+        for name in self.evaluator.metric_names:
+            for k in self.evaluator.k_list:
+                metrics_accum[f'{name}@{k}'] = 0.0
         
-        metrics_accum = {f'ndcg@{k}': 0.0 for k in self.evaluator.k_list}
-        if 'recall' in self.evaluator.metric_names:
-             for k in self.evaluator.k_list: metrics_accum[f'recall@{k}'] = 0.0
+        # chunked evaluation loop
+        num_batches = (n_val + batch_size_eval - 1) // batch_size_eval
         
-        num_batches = (n_val + batch_size - 1) // batch_size
-        
-        for i in range(num_batches):
-            start = i * batch_size
-            end = min((i + 1) * batch_size, n_val)
-            batch_users = val_users[start:end]
+        for i in tqdm(range(num_batches), desc="Evaluating Ranking", leave=False):
+            start = i * batch_size_eval
+            end = min((i + 1) * batch_size_eval, n_val)
+            batch_user_ids = val_users[start:end]
+            batch_user_embs = all_embs_cpu[batch_user_ids].to(self.device)
+
+            scores = torch.matmul(batch_user_embs, item_embs.t())
+            batch_gt_sparse = self.val_ground_truth[batch_user_ids]
             
-            u_emb = user_embs_all[batch_users] 
-            batch_gt_sparse = self.val_ground_truth[batch_users]
-            batch_gt_dense = torch.FloatTensor(batch_gt_sparse.toarray()).to(self.device)
-            
-            results = self.evaluator.evaluate_full_ranking(
-                user_emb=u_emb,
-                ground_truth_mask=batch_gt_dense,
-                all_item_emb=item_embs_all
+            batch_metrics = self.evaluator.evaluate_batch(
+                scores=scores,
+                ground_truth_batch=batch_gt_sparse
             )
             
-            for k, v in results.items():
-                metrics_accum[k] += v * len(batch_users)
-                
+            current_batch_size = len(batch_user_ids)
+            for k, v in batch_metrics.items():
+                metrics_accum[k] += v * current_batch_size
+
         final_metrics = {k: v / n_val for k, v in metrics_accum.items()}
-        prefixed = {f'Val/{k}': v for k, v in final_metrics.items()}
-        self.logger.log_metrics(prefixed, self.step)
         
+        self.logger.log_metrics({f'Val/{k}': v for k, v in final_metrics.items()}, self.step)
         return final_metrics

@@ -1,4 +1,2 @@
 batch_size: 1024
 num_neighbors: [10, 5]
-num_workers: 4
-pin_memory: True
