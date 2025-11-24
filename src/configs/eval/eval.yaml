@@ -1,16 +1,16 @@
+# src/configs/eval/eval.yaml
+defaults:
+  - _self_
+  - /model: mbgcn          # Load model config so we can access ${model.*}
+  - /recommender: mbgcn    # Load the recommender wrapper we just created
+  - /dataset: yambda
+
 clearml:
   project_name: "Yambda-RecSys"
-  task_name: "ItemKNN-Eval"
-  tags: ["itemknn", "evaluation"]
+  tags: ["evaluation", "mbgcn"]
+
+metrics:
+  k: 20
 
 dataset:
-  train_path: "src/datasets/multi_event_train.parquet" 
-  test_path: "src/datasets/multi_event_test.parquet"   
-  val_path: "src/datasets/multi_event_val.parquet"     
-
-model:
-  name: "ItemKNN"
-  neighbors_per_liked: 50
-  top_k: 20  # Number of items to recommend
-
-limit: 10 # Limit the number of users to evaluate (for debugging)
+  processed_dir: "data/processed"

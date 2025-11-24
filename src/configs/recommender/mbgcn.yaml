@@ -1,0 +1,22 @@
+# src/configs/recommender/mbgcn.yaml
+
+_target_: src.recommenders.mbgcn_recommender.MBGCNRecommender
+
+name: "mbgcn_recommender"
+device: "mps"
+
+# Paths specific to evaluation
+checkpoint_path: null
+item_features_path: "src/datasets/embeddings.parquet"
+
+# We map the parameters required by MBGCNRecommender.model_params 
+# to the values defined in your existing src/configs/model/mbgcn.yaml.
+# This ensures training and eval always use the same architecture settings.
+model_params:
+  node_emb_dim: ${model.node_emb_dim}
+  user_emb_dim: ${model.user_emb_dim}
+  behaviour_hidden_dim: ${model.behaviour_hidden_dim}
+  n_gnn_layers: ${model.n_gnn_layers}
+  fusion: ${model.fusion}
+  dropout: ${model.dropout}
+  # Add other params here if your model config has them (e.g. n_heads)

@@ -1,7 +1,7 @@
 root_dir: "./data"
-train_file: "train.csv"
-val_file: "val.csv"
-test_file: "test.csv"
+train_file: "src/datasets/multi_event_train.parquet"
+val_file: "src/datasets/multi_event_val.parquet"
+test_file: "src/datasets/multi_event_test.parquet"
 
 # items' semantic embeddings
 item_features_path: null

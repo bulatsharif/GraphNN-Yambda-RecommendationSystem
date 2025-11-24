@@ -2,9 +2,9 @@ import hydra
 from omegaconf import DictConfig
 from clearml import Task, Logger
 import pandas as pd
-from tqdm.auto import tqdm
 import numpy as np
-from src.recommenders.item_knn import ItemKNN
+import os
+from src.recommenders.BaseRecommender import BaseRecommender
 
 def compute_recall_at_k(recommended: list, relevant: set, k: int) -> float:
     if not relevant:
@@ -12,68 +12,80 @@ def compute_recall_at_k(recommended: list, relevant: set, k: int) -> float:
     rec_k = set(recommended[:k])
     return len(rec_k.intersection(relevant)) / len(relevant)
 
-def evaluate_model(model, test_df, k, limit=None):
-    """
-    Evaluates the model on the test set.
-    """
-    # Group test data by user to get ground truth
-    test_user_interactions = test_df.groupby('uid')['item_id'].apply(set).to_dict()
-    test_users = list(test_user_interactions.keys())
-    
-    if limit:
-        test_users = test_users[:limit]
+def evaluate_recommender(recommender: BaseRecommender, 
+                         test_df: pd.DataFrame, 
+                         train_df: pd.DataFrame, 
+                         k: int):
+    # 1. Build Ground Truth
+    test_ground_truth = test_df.groupby('uid')['item_id'].apply(set).to_dict()
+    test_users = list(test_ground_truth.keys())
 
-    # Generate recommendations
-    # Note: The model's fit() method already stored the training history internally, 
-    # which it uses as the 'history_filter' implicitly for seeds.
-    preds = model.recommend(test_users, k=k)
-    
+    # 2. Build History Filter (Items seen in training)
+    train_history = train_df.groupby('uid')['item_id'].apply(list).to_dict()
+
+    # 3. Generate Recommendations
+    print(f"Generating Top-{k} recommendations for {len(test_users)} users...")
+    recommendations = recommender.recommend(
+        user_ids=test_users, 
+        k=k, 
+        history_filter=train_history
+    )
+
+    # 4. Calculate Metrics
+    print("Calculating Recall...")
     recalls = []
-    logger = Logger.current_logger()
-    pbar = tqdm(test_users, desc="Calculating metrics")
-    for idx, uid in enumerate(pbar, start=1):
-        ground_truth = test_user_interactions[uid]
-        recommendations = preds.get(uid, [])
-        
-        recall = compute_recall_at_k(recommendations, ground_truth, k)
-        recalls.append(recall)
+    for uid in test_users:
+        if uid in recommendations:
+            r = compute_recall_at_k(recommendations[uid], test_ground_truth[uid], k)
+            recalls.append(r)
+        else:
+            recalls.append(0.0)
+    
     return np.mean(recalls)
 
-@hydra.main(version_base=None, config_path="../configs/eval", config_name="eval")
+@hydra.main(version_base=None, config_path="../configs", config_name="eval/eval")
 def main(cfg: DictConfig):
-    # 1. Initialize ClearML
-    task = Task.init(
-        project_name=cfg.clearml.project_name, 
-        task_name=cfg.clearml.task_name,
-        tags=cfg.clearml.tags
-    )
-    task.connect(cfg) # Logs the Hydra config to ClearML
+    if cfg.get("clearml"):
+        task = Task.init(
+            project_name=cfg.clearml.project_name, 
+            task_name=f"Eval-{cfg.recommender.name}", # Changed to use recommender name
+            tags=cfg.clearml.tags
+        )
+        task.connect(cfg)
+    
+    # 1. Load Data
+    data_dir = cfg.dataset.processed_dir
+    print(f"Loading data from {data_dir}...")
+    
+    train_path = os.path.join(data_dir, "multi_event_train.parquet")
+    test_path = os.path.join(data_dir, "multi_event_test.parquet")
+    
+    train_df = pd.read_parquet(train_path)
+    test_df = pd.read_parquet(test_path)
 
-    print("Loading Data...")
-    # Replace with your actual data loading logic
-    train_df = pd.read_parquet(cfg.dataset.train_path)
-    test_df = pd.read_parquet(cfg.dataset.test_path)
-    
-    print(f"Initializing {cfg.model.name}...")
-    model = ItemKNN(neighbors_per_liked=cfg.model.neighbors_per_liked)
-    
+    # 2. Instantiate Recommender
+    # We now instantiate the 'recommender' node, which wraps the model
+    print(f"Instantiating recommender: {cfg.recommender.name}")
+    model: BaseRecommender = hydra.utils.instantiate(cfg.recommender)
+
+    # 3. Fit Model
     print("Fitting model...")
-    model.fit(train_df)
+    model.fit(train_df, test_df=test_df)
+
+    # 4. Evaluate
+    k = cfg.metrics.k
+    print(f"Starting evaluation @ K={k}...")
+    recall_score = evaluate_recommender(model, test_df, train_df, k)
     
-    print("Evaluating...")
-    k = cfg.model.top_k
-    limit = cfg.get("limit")
-    recall_score = evaluate_model(model, test_df, k, limit=limit)
-    
-    print(f"Recall@{k}: {recall_score}")
-    
-    # Log metrics to ClearML
-    Logger.current_logger().report_scalar(
-        title="Evaluation", 
-        series=f"Recall@{k}", 
-        value=recall_score, 
-        iteration=1
-    )
+    print(f"Final Recall@{k}: {recall_score:.6f}")
+
+    if cfg.get("clearml"):
+        Logger.current_logger().report_scalar(
+            title="Evaluation", 
+            series=f"Recall@{k}", 
+            value=recall_score, 
+            iteration=1
+        )
 
 if __name__ == "__main__":
     main()
