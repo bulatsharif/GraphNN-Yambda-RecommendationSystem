@@ -24,10 +24,11 @@ class YambdaPreprocessor:
         df_filtered = df[df['event_type'].isin(allowed_types)].copy()
         return df_filtered
 
-    def load_data(self, interaction_types: List[str]) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-        """Loads pre-split parquet files and applies processing."""
+    def load_data(self, interaction_types: List[str], train_sampling_ratio: float = 1.0) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+        """
+        Loads data and optionally samples the training set.
+        """
         print(f"Loading raw data from {self.data_dir}...")
-        
         train_df = pd.read_parquet(os.path.join(self.data_dir, 'multi_event_train.parquet'))
         val_df = pd.read_parquet(os.path.join(self.data_dir, 'multi_event_val.parquet'))
         test_df = pd.read_parquet(os.path.join(self.data_dir, 'multi_event_test.parquet'))
@@ -40,6 +41,11 @@ class YambdaPreprocessor:
         train_df = self._convert_and_filter(train_df, interaction_types)
         val_df = self._convert_and_filter(val_df, interaction_types)
         test_df = self._convert_and_filter(test_df, interaction_types)
+        
+        if train_sampling_ratio < 1.0 and train_sampling_ratio > 0.0:
+            original_size = len(train_df)
+            train_df = train_df.sample(frac=train_sampling_ratio, random_state=42)
+            print(f"SAMPLED Train Data: {train_sampling_ratio*100}% | {original_size} -> {len(train_df)} rows")
         
         return train_df, val_df, test_df
     

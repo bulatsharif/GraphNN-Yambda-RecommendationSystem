@@ -46,7 +46,8 @@ def main(cfg: DictConfig):
     device = torch.device(cfg.device if torch.cuda.is_available() else "cpu")
     
     logger = ExperimentLogger(cfg)
-    print(f"Experiment: {cfg.experiment_name} | Target: {cfg.target_event}")
+    sampling_ratio = cfg.dataset.get('train_sampling_ratio', 1.0)
+    print(f"Experiment: {cfg.experiment_name} | Target: {cfg.target_event} | Sampling: {sampling_ratio}")
 
     data_dir = hydra.utils.to_absolute_path(cfg.dataset.data_dir)
     embedding_path = None
@@ -57,7 +58,7 @@ def main(cfg: DictConfig):
     
     interaction_types = list(cfg.dataset.interaction_types)
     print(f"Loading data with interaction types: {interaction_types}")
-    train_df, val_df, test_df = preprocessor.load_data(interaction_types)
+    train_df, val_df, test_df = preprocessor.load_data(interaction_types, sampling_ratio)
     
     data, user_map, item_map, num_users, num_items = create_pyg_data(
         train_df, val_df, test_df, interaction_types
