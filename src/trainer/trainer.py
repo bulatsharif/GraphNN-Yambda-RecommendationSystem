@@ -27,7 +27,6 @@ class MBGCNTrainer:
         self.criterion = criterion
 
         self.train_loader = loaders['train']
-        self.val_loader = loaders['val'] 
         self.inference_loader = loaders['inference']
 
         self.evaluator = evaluator
@@ -50,15 +49,15 @@ class MBGCNTrainer:
             item_feats=self.item_feats
         )
         
-        assert hasattr(batch, 'edge_label'), "Data batch must have 'edge_label' attribute to calculate loss"
-
-        pos_mask = batch.edge_label == 1.0
-        neg_mask = batch.edge_label == 0.0
-        user_emb = out[batch.edge_label_index[0]]
-        item_emb = out[batch.edge_label_index[1]]
-        pos_scores = (user_emb[pos_mask] * item_emb[pos_mask]).sum(dim=-1)
-        neg_scores = (user_emb[neg_mask] * item_emb[neg_mask]).sum(dim=-1)
-        assert len(pos_scores) == len(neg_scores), "BPR loss assumes that negative_sampling_ratio = 1.0!"
+        num_samples = batch.edge_label_index.size(1)
+        assert num_samples % 2 == 0, "Batch size must be even for BPR (pos + neg pairs)"
+        batch_size = num_samples // 2
+        
+        src_emb = out[batch.edge_label_index[0]]
+        dst_emb = out[batch.edge_label_index[1]]
+        scores = (src_emb * dst_emb).sum(dim=-1)
+        pos_scores = scores[:batch_size]
+        neg_scores = scores[batch_size:]
         
         loss = self.criterion(pos_scores, neg_scores)
         self.optimizer.zero_grad()
@@ -106,7 +105,7 @@ class MBGCNTrainer:
         return torch.cat(all_embeddings, dim=0)
     
     @torch.no_grad()
-    def evaluate_full_ranking(self, batch_size_eval=100):
+    def evaluate_full_ranking(self, batch_size_eval=1024):
         """
         Evaluate ranking metrics on all the embeddings.
         1. Obtain all the embeddings (on CPU).

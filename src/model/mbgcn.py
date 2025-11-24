@@ -18,6 +18,9 @@ class BehaviourGNNBlock(nn.Module):
         self.dropout_proba = dropout
 
     def forward(self, x: Tensor, edge_index: Tensor):
+        if edge_index.numel() == 0:
+            return x
+        
         for i, conv in enumerate(self.convs):
             x = conv(x, edge_index)
             x = self.bns[i](x)
@@ -41,6 +44,7 @@ class MBGCN(nn.Module):
             dropout: int = 0.2,
             use_pretrained_item_feats: bool = True
     ):
+        super().__init__()
         self.num_users = num_users
         self.num_items = num_items
         self.num_nodes = num_users + num_items
@@ -57,7 +61,7 @@ class MBGCN(nn.Module):
 
         self.user_proj = nn.Linear(user_emb_dim, node_emb_dim)
         self.item_proj = nn.Linear(item_feat_dim, node_emb_dim)
-        self.fusion = fusion
+        self.fusion_type = fusion
 
         self.behaviour_blocks = nn.ModuleList([
             BehaviourGNNBlock(node_emb_dim, behaviour_hidden_dim, n_layers=n_gnn_layers, dropout=dropout)

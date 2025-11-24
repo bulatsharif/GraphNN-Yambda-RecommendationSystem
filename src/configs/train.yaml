@@ -11,8 +11,10 @@ defaults:
 
 seed: 42
 device: "cuda"
-experiment_name: "mbgcn-yambda-base"
+experiment_name: "mbgcn-yambda-${dataset.target_event}"
 debug: False
+
+target_event: ${dataset.target_event}
 
 hydra:
   run:

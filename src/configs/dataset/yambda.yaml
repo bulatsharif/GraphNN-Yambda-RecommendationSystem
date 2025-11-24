@@ -1,7 +1,6 @@
-event_path: "data/events.parquet"
-embedding_path: "data/embeddings.parquet"
-interaction_types: ['listen', 'like']
-min_interactions: 3
-test_days: 1
-val_days: 1
+name: yambda-50m
+data_dir: "data/yambda/flat/50m" 
+embedding_path: "data/yambda/embeddings.parquet"
+interaction_types: ['listen+', 'like'] 
+target_event: "listen+"
 k_core: 0
