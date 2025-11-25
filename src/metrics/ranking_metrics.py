@@ -9,11 +9,11 @@ class RankingEvaluator:
         self.metric_names = [m.lower() for m in metric_names]
         self.max_k = self.k_list[-1]
 
-    def _calculate_ndcg_score(self, hits: np.ndarray, num_relevant: np.ndarray, k: int) -> float:
+    def _calculate_ndcg(self, hits: np.ndarray, num_relevant: np.ndarray, k: int) -> float:
         discounts = 1.0 / np.log2(np.arange(k) + 2.0)
         dcg = (hits * discounts).sum(axis=1)
-        top_k_range = np.arange(k)
         
+        top_k_range = np.arange(k)
         ideal_hits = (top_k_range[None, :] < num_relevant[:, None]).astype(np.float32)
         idcg = (ideal_hits * discounts).sum(axis=1)
         
@@ -23,12 +23,6 @@ class RankingEvaluator:
     def evaluate_batch(self, 
                        scores: torch.Tensor, 
                        ground_truth_batch: sp.csr_matrix) -> Dict[str, float]:
-        """
-        Args:
-            scores: (batch_size, num_items) - Dense scores from model
-            ground_truth_batch: (batch_size, num_items) - Sparse CSR matrix
-        """
-        # select indices of items with maximal scores for each user 
         _, topk_indices = torch.topk(scores, k=self.max_k, dim=1)
         topk_indices = topk_indices.detach().cpu().numpy()
 
@@ -37,7 +31,8 @@ class RankingEvaluator:
         num_relevant = np.diff(ground_truth_batch.indptr)
 
         for i in range(batch_size):
-            true_items = ground_truth_batch.indices[ground_truth_batch.indptr[i]:ground_truth_batch.indptr[i+1]]
+            start, end = ground_truth_batch.indptr[i], ground_truth_batch.indptr[i+1]
+            true_items = ground_truth_batch.indices[start:end]
             
             if len(true_items) == 0:
                 continue

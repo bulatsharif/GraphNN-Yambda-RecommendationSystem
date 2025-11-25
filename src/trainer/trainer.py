@@ -5,8 +5,6 @@ from typing import Dict, Any, Optional
 import numpy as np
 import scipy.sparse as sp
 
-from src.metrics.ranking_metrics import RankingEvaluator
-
 class MBGCNTrainer:
     def __init__(
         self, 
@@ -15,7 +13,7 @@ class MBGCNTrainer:
         criterion: nn.Module, 
         loaders: Dict,
         full_data: Any,
-        evaluator: RankingEvaluator,
+        evaluator: Any,
         train_ground_truth: sp.csr_matrix,
         val_ground_truth: sp.csr_matrix,
         logger, 
@@ -39,7 +37,6 @@ class MBGCNTrainer:
         self.step = 0
 
     def _run_batch(self, batch):
-        """Train step logic"""
         batch = batch.to(self.device)
         
         out = self.model(
@@ -49,17 +46,17 @@ class MBGCNTrainer:
             item_feats=self.item_feats
         )
         
-        num_samples = batch.edge_label_index.size(1)
-        assert num_samples % 2 == 0, "Batch size must be even for BPR (pos + neg pairs)"
-        batch_size = num_samples // 2
-        
         src_emb = out[batch.edge_label_index[0]]
         dst_emb = out[batch.edge_label_index[1]]
+        
         scores = (src_emb * dst_emb).sum(dim=-1)
+        
+        batch_size = scores.shape[0] // 2
         pos_scores = scores[:batch_size]
         neg_scores = scores[batch_size:]
         
         loss = self.criterion(pos_scores, neg_scores)
+        
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
@@ -68,30 +65,26 @@ class MBGCNTrainer:
     def train_epoch(self, epoch_idx: int):
         self.model.train()
         total_loss = 0
-        pbar = tqdm(self.train_loader, desc=f"Epoch {epoch_idx} [Train]", leave=False)
+        pbar = tqdm(self.train_loader, desc=f"Epoch {epoch_idx} [Train]", leave=True)
         
         for batch in pbar:
             loss_val = self._run_batch(batch)
             total_loss += loss_val
             self.step += 1
             
-            if self.step % 100 == 0:
+            if self.step % 50 == 0:
                 self.logger.log_metrics({'Train/Loss': loss_val}, self.step)
-            pbar.set_postfix({'loss': loss_val})
+            pbar.set_postfix({'loss': f"{loss_val:.4f}"})
             
         return total_loss / len(self.train_loader)
     
     @torch.no_grad()
     def get_all_embeddings(self) -> torch.Tensor:
-        """
-        Obtain the embeddings of all users and track on cpu through model forwarding by batch.
-        """
         self.model.eval()
         all_embeddings = []
         
         for batch in tqdm(self.inference_loader, desc="Generating Embeddings", leave=False):
             batch = batch.to(self.device)
-                        
             out = self.model(
                 edge_index=batch.edge_index,
                 edge_type=batch.edge_type,
@@ -100,27 +93,18 @@ class MBGCNTrainer:
             )
             num_target_nodes = batch.batch_size
             target_embs = out[:num_target_nodes]
-            all_embeddings.append(target_embs.cpu()) # upload to cpu to free GPU memory
+            all_embeddings.append(target_embs.cpu())
 
         return torch.cat(all_embeddings, dim=0)
     
     @torch.no_grad()
-    def evaluate_full_ranking(self, batch_size_eval=1024):
-        """
-        Evaluate ranking metrics on all the embeddings.
-        1. Obtain all the embeddings (on CPU).
-        2. Upload all item embeddings on GPU.
-        3. Upload user embeddings on GPU by batch.
-        4. Calculate metrics.
-        """
+    def evaluate_full_ranking(self, batch_size_eval=2048):
         self.model.eval()
-        # generate embeddings
         all_embs_cpu = self.get_all_embeddings()
         num_users = self.model.num_users
         
         item_embs = all_embs_cpu[num_users:].to(self.device)
         
-        # identify validation users
         val_users = np.unique(self.val_ground_truth.nonzero()[0])
         n_val = len(val_users)
 
@@ -129,16 +113,17 @@ class MBGCNTrainer:
             for k in self.evaluator.k_list:
                 metrics_accum[f'{name}@{k}'] = 0.0
         
-        # chunked evaluation loop
         num_batches = (n_val + batch_size_eval - 1) // batch_size_eval
         
         for i in tqdm(range(num_batches), desc="Evaluating Ranking", leave=False):
             start = i * batch_size_eval
             end = min((i + 1) * batch_size_eval, n_val)
             batch_user_ids = val_users[start:end]
+            
             batch_user_embs = all_embs_cpu[batch_user_ids].to(self.device)
 
             scores = torch.matmul(batch_user_embs, item_embs.t())
+            
             batch_gt_sparse = self.val_ground_truth[batch_user_ids]
             
             batch_metrics = self.evaluator.evaluate_batch(
@@ -151,6 +136,5 @@ class MBGCNTrainer:
                 metrics_accum[k] += v * current_batch_size
 
         final_metrics = {k: v / n_val for k, v in metrics_accum.items()}
-        
         self.logger.log_metrics({f'Val/{k}': v for k, v in final_metrics.items()}, self.step)
         return final_metrics
