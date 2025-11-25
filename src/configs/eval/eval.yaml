@@ -8,10 +8,11 @@ recommender_name: "ItemKNN" # Options: "MBGCN", "ItemKNN"
 model_path: "outputs/2025-11-25/21-19-01/checkpoints/best_model.pth" # Path to the model checkpoint (ignored for ItemKNN)
 item_features_path: "src/datasets/embeddings.parquet"
 device: "mps"
+max_test_samples: 10 # Optional: Limit number of users for evaluation
 
-# clearml:
-#   project_name: "Yambda-RecSys"
-#   tags: ["evaluation", "mbgcn"]
+clearml:
+  project_name: "Yambda-RecSys"
+  tags: ["evaluation", "mbgcn"]
 
 metrics:
   k: 20

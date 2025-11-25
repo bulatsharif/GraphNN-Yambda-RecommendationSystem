@@ -6,7 +6,7 @@ import numpy as np
 import os
 from src.recommenders.BaseRecommender import BaseRecommender
 from src.recommenders.item_knn import ItemKNN
-from src.recommenders.mbgcn_recommender import MBGCNRecommender
+from src.datasets.preprocessor import YambdaPreprocessor
 
 def compute_recall_at_k(recommended: list, relevant: set, k: int) -> float:
     if not relevant:
@@ -60,13 +60,21 @@ def main(cfg: DictConfig):
         )
         task.connect(cfg)
     
-    # 1. Load Data    
-    train_path = cfg.dataset.train_file
-    test_path = cfg.dataset.test_file
-    print(f"Loading train data from {train_path} and test data from {test_path}...")
+    # 1. Load Data
+    data_dir = hydra.utils.to_absolute_path(cfg.dataset.data_dir)
+    interaction_types = list(cfg.dataset.interaction_types)
+    print(f"Loading data from {data_dir} with interactions {interaction_types}...")
     
-    train_df = pd.read_parquet(train_path)
-    test_df = pd.read_parquet(test_path)
+    preprocessor = YambdaPreprocessor(data_dir=data_dir)
+    train_df, _, test_df = preprocessor.load_data(interaction_types)
+
+    # Optional: Sample test users
+    if cfg.get("max_test_samples"):
+        unique_users = test_df['uid'].unique()
+        if len(unique_users) > cfg.max_test_samples:
+             print(f"Sampling {cfg.max_test_samples} users from {len(unique_users)} for evaluation...")
+             sampled_users = np.random.choice(unique_users, cfg.max_test_samples, replace=False)
+             test_df = test_df[test_df['uid'].isin(sampled_users)]
 
     # 2. Instantiate Recommender
     print(f"Instantiating recommender: {recommender_name}")
