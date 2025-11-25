@@ -1,7 +1,7 @@
-root_dir: "./data"
-train_file: "train.csv"
-val_file: "val.csv"
-test_file: "test.csv"
-
-# items' semantic embeddings
-item_features_path: null
+name: yambda-50m
+data_dir: "data/yambda/flat/50m" 
+embedding_path: "data/yambda/embeddings.parquet"
+interaction_types: ['listen+', 'like'] 
+target_event: "listen+"
+train_sampling_ratio: 0.05
+k_core: 0
