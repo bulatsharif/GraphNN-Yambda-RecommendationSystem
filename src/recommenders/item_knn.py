@@ -5,18 +5,20 @@ import heapq
 from tqdm.auto import tqdm
 from collections import defaultdict
 from typing import List, Dict, Tuple
-from .BaseRecommender import BaseRecommender  # Assuming BaseRecommender is in the same directory
+from functools import lru_cache # Import lru_cache
+from .BaseRecommender import BaseRecommender
 
 class ItemKNN(BaseRecommender):
     def __init__(self, neighbors_per_liked: int = 50):
         self.neighbors_per_liked = neighbors_per_liked
         self.X = None
+        self.Xt = None # Store transposed matrix
         self.item_pop = None
         self.item_id_to_idx = None
         self.idx_to_item_id = None
         self.user_history = defaultdict(set)
 
-    def fit(self, df: pd.DataFrame):
+    def fit(self, df: pd.DataFrame, test_df=None):
         """Builds the User-Item matrix and pre-computes statistics."""
         # Store user history for fast lookup
         for uid, group in df.groupby('uid'):
@@ -33,17 +35,23 @@ class ItemKNN(BaseRecommender):
             (np.ones(len(du), dtype=np.uint8), (item_codes, user_codes)),
             shape=(len(item_index), len(user_index))
         )
+        
+        # [OPTIMIZATION 1] Pre-compute and cache the transposed matrix (CSC format is efficient for columns)
+        self.Xt = self.X.T.tocsr()
 
         self.item_id_to_idx = dict(zip(item_index, np.arange(len(item_index))))
         self.idx_to_item_id = np.array(item_index)
         self.item_pop = np.asarray(self.X.getnnz(axis=1), dtype=np.int32)
 
+    # [OPTIMIZATION 2] Cache results for recently queried items
+    @lru_cache(maxsize=10000) 
     def _get_nearest_items(self, item_original_id, top_k: int) -> List[Tuple[int, float]]:
         i = self.item_id_to_idx.get(item_original_id, None)
         if i is None or self.item_pop[i] == 0:
             return []
 
-        intersection = self.X[i].dot(self.X.T).toarray().ravel()
+        # [OPTIMIZATION 1] Use pre-computed Xt
+        intersection = self.X[i].dot(self.Xt).toarray().ravel()
         union = self.item_pop[i] + self.item_pop - intersection
         
         # Avoid division by zero
@@ -60,8 +68,11 @@ class ItemKNN(BaseRecommender):
     def recommend(self, user_ids: List[int], k: int, history_filter: Dict[int, List[int]] = None) -> Dict[int, List[int]]:
         recommendations = {}
         
+        # Clear cache before large batch prediction if necessary, or let it warm up
+        self._get_nearest_items.cache_clear() 
+        
         for i, uid in tqdm(enumerate(user_ids), total=len(user_ids), desc="Generating recommendations"):
-            # Determine seed items: use provided filter (e.g. train set) or internal history
+            # ... (Rest of logic remains the same) ...
             user_items = set()
             if history_filter and uid in history_filter:
                 user_items = set(history_filter[uid])
@@ -76,14 +87,12 @@ class ItemKNN(BaseRecommender):
             scores = defaultdict(float)
 
             for seed in seeds:
-                # Find neighbors for each item in user history
                 neighbors = self._get_nearest_items(seed, self.neighbors_per_liked)
                 for nid, s in neighbors:
                     if nid in user_items or nid == seed:
                         continue
                     scores[nid] += s
             
-            # Select Top-K
             if not scores:
                 recommendations[uid] = []
             else:

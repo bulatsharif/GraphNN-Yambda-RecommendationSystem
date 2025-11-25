@@ -2,12 +2,16 @@
 defaults:
   - _self_
   - /model: mbgcn          # Load model config so we can access ${model.*}
-  - /recommender: mbgcn    # Load the recommender wrapper we just created
   - /dataset: yambda
 
-clearml:
-  project_name: "Yambda-RecSys"
-  tags: ["evaluation", "mbgcn"]
+recommender_name: "ItemKNN" # Options: "MBGCN", "ItemKNN"
+model_path: "outputs/2025-11-25/21-19-01/checkpoints/best_model.pth" # Path to the model checkpoint (ignored for ItemKNN)
+item_features_path: "src/datasets/embeddings.parquet"
+device: "mps"
+
+# clearml:
+#   project_name: "Yambda-RecSys"
+#   tags: ["evaluation", "mbgcn"]
 
 metrics:
   k: 20

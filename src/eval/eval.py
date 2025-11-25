@@ -1,10 +1,12 @@
 import hydra
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from clearml import Task, Logger
 import pandas as pd
 import numpy as np
 import os
 from src.recommenders.BaseRecommender import BaseRecommender
+from src.recommenders.item_knn import ItemKNN
+from src.recommenders.mbgcn_recommender import MBGCNRecommender
 
 def compute_recall_at_k(recommended: list, relevant: set, k: int) -> float:
     if not relevant:
@@ -45,28 +47,42 @@ def evaluate_recommender(recommender: BaseRecommender,
 
 @hydra.main(version_base=None, config_path="../configs", config_name="eval/eval")
 def main(cfg: DictConfig):
+    # Unwrap config if it's nested under 'eval'
+    if "eval" in cfg:
+        cfg = cfg.eval
+        
+    recommender_name = cfg.recommender_name
     if cfg.get("clearml"):
         task = Task.init(
             project_name=cfg.clearml.project_name, 
-            task_name=f"Eval-{cfg.recommender.name}", # Changed to use recommender name
+            task_name=f"Eval-{recommender_name}", 
             tags=cfg.clearml.tags
         )
         task.connect(cfg)
     
-    # 1. Load Data
-    data_dir = cfg.dataset.processed_dir
-    print(f"Loading data from {data_dir}...")
-    
-    train_path = os.path.join(data_dir, "multi_event_train.parquet")
-    test_path = os.path.join(data_dir, "multi_event_test.parquet")
+    # 1. Load Data    
+    train_path = cfg.dataset.train_file
+    test_path = cfg.dataset.test_file
+    print(f"Loading train data from {train_path} and test data from {test_path}...")
     
     train_df = pd.read_parquet(train_path)
     test_df = pd.read_parquet(test_path)
 
     # 2. Instantiate Recommender
-    # We now instantiate the 'recommender' node, which wraps the model
-    print(f"Instantiating recommender: {cfg.recommender.name}")
-    model: BaseRecommender = hydra.utils.instantiate(cfg.recommender)
+    print(f"Instantiating recommender: {recommender_name}")
+    
+    if recommender_name == "ItemKNN":
+        model = ItemKNN()
+    elif recommender_name == "MBGCN":
+        model_params = OmegaConf.to_container(cfg.model, resolve=True)
+        model = MBGCNRecommender(
+            model_params=model_params,
+            item_features_path=cfg.item_features_path,
+            checkpoint_path=cfg.model_path,
+            device=cfg.device
+        )
+    else:
+        raise ValueError(f"Unknown recommender: {recommender_name}")
 
     # 3. Fit Model
     print("Fitting model...")
