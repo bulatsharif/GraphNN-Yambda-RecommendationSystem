@@ -1,7 +1,8 @@
-root_dir: "./data"
-train_file: "src/datasets/multi_event_train.parquet"
-val_file: "src/datasets/multi_event_val.parquet"
-test_file: "src/datasets/multi_event_test.parquet"
+name: yambda-50m
+data_dir: "data/yambda/flat/50m" 
+embedding_path: "data/yambda/embeddings.parquet"
+interaction_types: ['listen+', 'like'] 
+target_event: "listen+"
+train_sampling_ratio: 0.05
+k_core: 0
 
-# items' semantic embeddings
-item_features_path: null
