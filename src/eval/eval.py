@@ -81,14 +81,6 @@ def main(cfg: DictConfig):
     
     if recommender_name == "ItemKNN":
         model = ItemKNN()
-    elif recommender_name == "MBGCN":
-        model_params = OmegaConf.to_container(cfg.model, resolve=True)
-        model = MBGCNRecommender(
-            model_params=model_params,
-            item_features_path=cfg.item_features_path,
-            checkpoint_path=cfg.model_path,
-            device=cfg.device
-        )
     else:
         raise ValueError(f"Unknown recommender: {recommender_name}")
 
