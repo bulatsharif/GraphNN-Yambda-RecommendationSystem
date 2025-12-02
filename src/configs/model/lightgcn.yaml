@@ -1,0 +1,5 @@
+_target_: src.model.lightgcn.LightGCN
+
+embedding_dim: 128
+n_layers: 3
+item_feat_dim: 128

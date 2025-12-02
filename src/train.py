@@ -11,9 +11,11 @@ from src.datasets.preprocessor import YambdaPreprocessor
 from src.datasets.dataloader import create_pyg_data, create_loaders
 from src.logger.logger import ExperimentLogger
 from src.trainer.trainer import MBGCNTrainer
+from src.trainer.lightgcn_trainer import LightGCNTrainer
 from src.metrics.ranking_metrics import RankingEvaluator
 from src.loss.bpr_loss import BPRLoss
 from src.model.mbgcn import MBGCN
+from src.model.lightgcn import LightGCN
 
 def seed_everything(seed: int):
     random.seed(seed)
@@ -65,7 +67,12 @@ def main(cfg: DictConfig):
     )
     print(f"Graph stats: Users={num_users}, Items={num_items}, Edges={data.num_edges}")
     
-    print(f"Building Ground Truth matrices for target: {cfg.target_event}...")
+    try:
+        target_event_idx = interaction_types.index(cfg.target_event)
+    except ValueError:
+        raise ValueError(f"Target event {cfg.target_event} not in interaction_types {interaction_types}")
+
+    print(f"Building Ground Truth matrices for target: {cfg.target_event} (Idx: {target_event_idx})...")
     train_gt = build_csr_matrix(train_df, user_map, item_map, num_users, num_items, cfg.target_event)
     val_gt = build_csr_matrix(val_df, user_map, item_map, num_users, num_items, cfg.target_event)
     
@@ -85,7 +92,7 @@ def main(cfg: DictConfig):
     
     item_feats = None
     use_pretrained = False
-    input_item_dim = cfg.model.item_feat_dim
+    input_item_dim = cfg.model.get('item_feat_dim', 128)
 
     if preprocessor.embeddings is not None:
         print("Processing pretrained item embeddings...")
@@ -113,19 +120,35 @@ def main(cfg: DictConfig):
             del preprocessor.embeddings, valid_emb_df
             gc.collect()
 
-    model = MBGCN(
-        num_users=num_users,
-        num_items=num_items,
-        num_behaviours=data.num_behaviours,
-        item_feat_dim=input_item_dim,
-        node_emb_dim=cfg.model.node_emb_dim,
-        user_emb_dim=cfg.model.user_emb_dim,
-        behaviour_hidden_dim=cfg.model.behaviour_hidden_dim,
-        n_gnn_layers=cfg.model.n_gnn_layers,
-        fusion=cfg.model.fusion,
-        dropout=cfg.model.dropout,
-        use_pretrained_item_feats=use_pretrained
-    ).to(device)
+    # Model Selection Logic
+    target_class = cfg.model._target_
+    print(f"Initializing Model: {target_class}")
+    
+    if "MBGCN" in target_class:
+        model = MBGCN(
+            num_users=num_users,
+            num_items=num_items,
+            num_behaviours=data.num_behaviours,
+            item_feat_dim=input_item_dim,
+            node_emb_dim=cfg.model.node_emb_dim,
+            user_emb_dim=cfg.model.user_emb_dim,
+            behaviour_hidden_dim=cfg.model.behaviour_hidden_dim,
+            n_gnn_layers=cfg.model.n_gnn_layers,
+            fusion=cfg.model.fusion,
+            dropout=cfg.model.dropout,
+            use_pretrained_item_feats=use_pretrained
+        ).to(device)
+    elif "LightGCN" in target_class:
+        model = LightGCN(
+            num_users=num_users,
+            num_items=num_items,
+            embedding_dim=cfg.model.embedding_dim,
+            n_layers=cfg.model.n_layers,
+            use_pretrained_item_feats=use_pretrained,
+            item_feat_dim=input_item_dim
+        ).to(device)
+    else:
+        raise ValueError(f"Unknown model target: {target_class}")
     
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.optimizer.lr)
     criterion = BPRLoss()
@@ -135,19 +158,36 @@ def main(cfg: DictConfig):
         metric_names=cfg.metrics.get('names', ['ndcg', 'recall'])
     )
     
-    trainer = MBGCNTrainer(
-        model=model,
-        optimizer=optimizer,
-        criterion=criterion,
-        loaders=loaders,
-        full_data=data,
-        evaluator=evaluator,
-        train_ground_truth=train_gt,
-        val_ground_truth=val_gt,
-        logger=logger,
-        device=device,
-        item_feats=item_feats
-    )
+    # Trainer Selection Logic
+    if "MBGCN" in target_class:
+        trainer = MBGCNTrainer(
+            model=model,
+            optimizer=optimizer,
+            criterion=criterion,
+            loaders=loaders,
+            full_data=data,
+            evaluator=evaluator,
+            train_ground_truth=train_gt,
+            val_ground_truth=val_gt,
+            logger=logger,
+            device=device,
+            item_feats=item_feats
+        )
+    elif "LightGCN" in target_class:
+        trainer = LightGCNTrainer(
+            model=model,
+            optimizer=optimizer,
+            criterion=criterion,
+            loaders=loaders,
+            full_data=data,
+            evaluator=evaluator,
+            train_ground_truth=train_gt,
+            val_ground_truth=val_gt,
+            logger=logger,
+            device=device,
+            target_event_idx=target_event_idx,
+            item_feats=item_feats
+        )
     
     epochs = cfg.trainer.epochs
     best_metric = 0.0
@@ -174,7 +214,6 @@ def main(cfg: DictConfig):
                     'best_metric': best_metric
                 }, save_path)
                 print(f"New best model saved! ({primary_metric_key}: {best_metric:.4f})")
-
     logger.close()
 
 if __name__ == "__main__":

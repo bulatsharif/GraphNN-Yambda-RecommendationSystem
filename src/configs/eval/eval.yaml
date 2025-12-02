@@ -1,14 +1,13 @@
-# src/configs/eval/eval.yaml
 defaults:
   - _self_
-  - /model: mbgcn          # Load model config so we can access ${model.*}
+  - /model: mbgcn
   - /dataset: yambda
 
-recommender_name: "ItemKNN" # Options: "MBGCN", "ItemKNN"
-model_path: "outputs/2025-11-25/21-19-01/checkpoints/best_model.pth" # Path to the model checkpoint (ignored for ItemKNN)
+recommender_name: "ItemKNN"
+model_path: "outputs/2025-11-25/21-19-01/checkpoints/best_model.pth"
 item_features_path: "src/datasets/embeddings.parquet"
 device: "mps"
-max_test_samples: 10 # Optional: Limit number of users for evaluation
+max_test_samples: 10
 
 clearml:
   project_name: "Yambda-RecSys"
